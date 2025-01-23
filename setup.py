@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="lazy_action",
-    version="0.0.4",
+    version="0.0.8",
     author="Irid",
     author_email="irid.zzy@gmail.com",
     description="lazy_action make your func lazy",
@@ -13,10 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/iridesc/lazy_action",
     packages=setuptools.find_packages(),
-    # include_package_data=True,
-    package_data={
-    },
-
+    include_package_data=True,
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
