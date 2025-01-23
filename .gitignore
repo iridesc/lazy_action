@@ -1,0 +1,7 @@
+.venv/*
+dist/*
+.lazy_action_cache/*
+.lazy_action.egg-info/*
+.cache/*
+lazy_action/__pycache__/lazy_action.cpython-312.pyc
+lazy_action.egg-info/*

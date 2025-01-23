@@ -1,12 +1,12 @@
-import time
 import inspect
 from diskcache import Cache
 import functools
 
-cache = Cache("./files/cache")
+lazy_action_cache = Cache(".lazy_action_cache")
 
 
-def lazy_action(expire=None):
+def lazy_action(expire=None, cache=None):
+    cache = cache if cache else lazy_action_cache
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -23,14 +23,3 @@ def lazy_action(expire=None):
     return decorator
 
 
-@lazy_action(expire=5)
-def test(t):
-    print(f"!{t}")
-    time.sleep(t)
-    return time.time()
-
-
-if __name__ == "__main__":
-    test(1)
-    test(2)
-    test(1)
