@@ -1,25 +1,148 @@
 import inspect
+import time
 from diskcache import Cache
 import functools
+import shutil
+from sqlite3 import DatabaseError
+import os
 
-lazy_action_cache = Cache(".lazy_action_cache")
+
+lazy_action_folder = ".lazy_action_cache"
+lazy_action_cache_path = f"{lazy_action_folder}/cache-{time}"
+log_prefix = "lazy_action >>"
+
+
+def _rm_caches():
+    for name in os.listdir(lazy_action_folder):
+        if name.startswith("cache-"):
+            target_folder = os.path.join(lazy_action_folder, name)
+   
+            for f in os.listdir(target_folder):
+                target = os.path.join(target_folder, f)
+                print(target)
+                try:
+                    if os.path.isfile(target):
+                        os.remove(target)
+                    else:
+                        shutil.rmtree(target)
+                except Exception as e:
+                    print(f"{log_prefix} remove old cache  failed: {target=} {e=}")    
+           
+            try:
+                print(f"{log_prefix} remove old cache {target_folder}...")
+                shutil.rmtree(target_folder)
+                break
+            except Exception as e:
+                print(f"{log_prefix} remove old cache {target_folder} failed: {e=}")
+            
+
+def _reset_cache():
+    global lazy_action_cache_path
+    global lazy_action_cache
+    lazy_action_cache = None
+
+    if os.path.exists(lazy_action_folder):
+        print(f"{log_prefix} cache folder exists")
+        if os.path.isdir(lazy_action_folder):
+            _rm_caches()
+            lazy_action_cache_path = os.path.join(
+                lazy_action_folder, f"cache-{time.time()}"
+            )
+        else:
+            print(f"{log_prefix} cache folder exists but is not a directory, removing")
+            os.remove(lazy_action_folder)
+            os.mkdir(lazy_action_folder)
+            lazy_action_cache_path = os.path.join(
+                lazy_action_folder, f"cache-{time.time()}"
+            )
+    else:
+        print(f"{log_prefix} create cache folder")
+        os.mkdir(lazy_action_folder)
+        lazy_action_cache_path = os.path.join(
+            lazy_action_folder, f"cache-{time.time()}"
+        )
+    lazy_action_cache = Cache(lazy_action_cache_path)
+    print(f"{log_prefix} cache reset to {lazy_action_cache_path}")
+
+
+try:
+    names = os.listdir(lazy_action_folder)
+    names.sort(reverse=True)
+
+    for name in names:
+        print(name)
+        if name.startswith("cache-"):
+            lazy_action_cache_path = os.path.join(lazy_action_folder, name)
+            break
+
+    print(f"{log_prefix} use exist cache {lazy_action_cache_path}")
+    lazy_action_cache = Cache(lazy_action_cache_path)
+except DatabaseError:
+    print(f"{log_prefix} DatabaseError remove cache file")
+    _reset_cache()
+
+except Exception as e:
+    print(f"{log_prefix} unknown error, reset cache!{e=}")
+    _reset_cache()
+
+
+def _get_or_run_and_set(
+    key,
+    func,
+    args,
+    kwargs,
+    expire,
+):
+    is_in_cache = False
+    try:
+       is_in_cache = key in lazy_action_cache
+    except Exception as e:
+        print(f"{log_prefix} unknown error, reset cache!{e=}")
+        _reset_cache()
+    
+    if is_in_cache:
+
+        try:
+            return lazy_action_cache[key]
+        except Exception as e:
+            print(f"{log_prefix} unknown error in lazy_action reset cache! {e=}")
+            result = func(
+                *args,
+                **kwargs,
+            )
+            _reset_cache()
+
+    else:
+        result = func(
+            *args,
+            **kwargs,
+        )
+        try:
+            lazy_action_cache.set(key, result, expire=expire)
+            return result
+        except Exception as e:
+            print(f"{log_prefix} unknown error in lazy_action reset cache! {e=}")
+            _reset_cache()
+
+    lazy_action_cache.set(key, result, expire=expire)
+    return result
 
 
 def lazy_action(expire=None, cache=None):
-    cache = cache if cache else lazy_action_cache
+    global lazy_action_cache
+    lazy_action_cache = cache if cache else lazy_action_cache
+
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            key = (inspect.getabsfile(func), func.__name__, args, tuple(kwargs.items()))
-            if key in cache:
-                result = cache[key]
-            else:
-                result = func(*args, **kwargs,)
-                cache.set(key, result, expire=expire)
-            return result
+            return _get_or_run_and_set(
+                (inspect.getabsfile(func), func.__name__, args, tuple(kwargs.items())),
+                func,
+                args,
+                kwargs,
+                expire,
+            )
 
         return wrapper
 
     return decorator
-
-
