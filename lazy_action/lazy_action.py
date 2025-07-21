@@ -8,33 +8,37 @@ import os
 
 
 lazy_action_folder = ".lazy_action_cache"
-lazy_action_cache_path = f"{lazy_action_folder}/cache-{time}"
+lazy_action_cache_path = f"{lazy_action_folder}/cache-{time.time()}"
 log_prefix = "lazy_action >>"
+
+
+def _del_path(path):
+    prefix = f"{log_prefix} _del_path {path=}"
+    if not os.path.exists(path):
+        return
+
+    if os.path.isdir(path):
+        try:
+            shutil.rmtree(path)
+
+        except Exception as e:
+            print(f"{prefix}  delete folder error:  {e}")
+            for file_inside in os.listdir(path):
+                _del_path(os.path.join(path, file_inside))
+
+    else:
+        try:
+            os.remove(path)
+        except Exception as e:
+            print(f"{prefix} delete file error: {e}")
 
 
 def _rm_caches():
     for name in os.listdir(lazy_action_folder):
         if name.startswith("cache-"):
             target_folder = os.path.join(lazy_action_folder, name)
-   
-            for f in os.listdir(target_folder):
-                target = os.path.join(target_folder, f)
-                print(target)
-                try:
-                    if os.path.isfile(target):
-                        os.remove(target)
-                    else:
-                        shutil.rmtree(target)
-                except Exception as e:
-                    print(f"{log_prefix} remove old cache  failed: {target=} {e=}")    
-           
-            try:
-                print(f"{log_prefix} remove old cache {target_folder}...")
-                shutil.rmtree(target_folder)
-                break
-            except Exception as e:
-                print(f"{log_prefix} remove old cache {target_folder} failed: {e=}")
-            
+            _del_path(target_folder)
+
 
 def _reset_cache():
     global lazy_action_cache_path
@@ -95,22 +99,25 @@ def _get_or_run_and_set(
 ):
     is_in_cache = False
     try:
-       is_in_cache = key in lazy_action_cache
+        is_in_cache = key in lazy_action_cache
     except Exception as e:
-        print(f"{log_prefix} unknown error, reset cache!{e=}")
+        print(f"{log_prefix} unknown error in check key in cache, reset cache!{e=}")
         _reset_cache()
-    
-    if is_in_cache:
 
+    if is_in_cache:
         try:
             return lazy_action_cache[key]
         except Exception as e:
-            print(f"{log_prefix} unknown error in lazy_action reset cache! {e=}")
+            print(
+                f"{log_prefix} unknown error in lazy_action fetch result, reset cache! {e=}"
+            )
             result = func(
                 *args,
                 **kwargs,
             )
             _reset_cache()
+            lazy_action_cache.set(key, result, expire=expire)
+            return result
 
     else:
         result = func(
@@ -121,11 +128,12 @@ def _get_or_run_and_set(
             lazy_action_cache.set(key, result, expire=expire)
             return result
         except Exception as e:
-            print(f"{log_prefix} unknown error in lazy_action reset cache! {e=}")
+            print(
+                f"{log_prefix} unknown error in lazy_action set result reset cache! {e=}"
+            )
             _reset_cache()
-
-    lazy_action_cache.set(key, result, expire=expire)
-    return result
+            lazy_action_cache.set(key, result, expire=expire)
+            return result
 
 
 def lazy_action(expire=None, cache=None):
