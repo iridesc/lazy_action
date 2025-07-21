@@ -43,6 +43,13 @@ def _rm_caches():
 def _reset_cache():
     global lazy_action_cache_path
     global lazy_action_cache
+
+    if lazy_action_cache is not None:
+        try:
+            lazy_action_cache.close() # 尝试关闭底层连接
+        except Exception as close_e:
+            print(f"{log_prefix} Error closing cache explicitly: {close_e}")
+    
     lazy_action_cache = None
 
     if os.path.exists(lazy_action_folder):
@@ -74,12 +81,10 @@ try:
     names.sort(reverse=True)
 
     for name in names:
-        print(name)
         if name.startswith("cache-"):
             lazy_action_cache_path = os.path.join(lazy_action_folder, name)
             break
 
-    print(f"{log_prefix} use exist cache {lazy_action_cache_path}")
     lazy_action_cache = Cache(lazy_action_cache_path)
 except DatabaseError:
     print(f"{log_prefix} DatabaseError remove cache file")

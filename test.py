@@ -26,8 +26,8 @@ def destroy_cache():
     for name in os.listdir(lazy_action_folder):
         if name.startswith("cache-"):
             print(f"->  destroy cache {name}")
-            with open(f".lazy_action_cache/{name}/cache.db", "w") as f:
-                f.write("-------------")
+            with open(f".lazy_action_cache/{name}/cache.db", "wb") as f:
+                f.write(b"-------------")
         
 def test_cache_recovery():
 
@@ -39,13 +39,13 @@ def test_cache_recovery():
 
 
 if __name__ == "__main__":
+    test(1)
+    test(2)
+    test(1)
+    test(1)
+    test(2)
+    test(1)
     destroy_cache()
-    test(1)
-    test(2)
-    test(1)
-    test(1)
-    test(2)
-    test(1)
 
     # test_customer_cache(1)
     # test_customer_cache(2)
