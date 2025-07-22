@@ -13,7 +13,7 @@ log_prefix = "lazy_action >>"
 
 
 def _del_path(path):
-    prefix = f"{log_prefix} _del_path {path=}"
+    prefix = f"{log_prefix} _del_path path={path}"
     if not os.path.exists(path):
         return
 
@@ -91,7 +91,7 @@ except DatabaseError:
     _reset_cache()
 
 except Exception as e:
-    print(f"{log_prefix} unknown error, reset cache!{e=}")
+    print(f"{log_prefix} unknown error, reset cache! e={e}")
     _reset_cache()
 
 
@@ -106,7 +106,7 @@ def _get_or_run_and_set(
     try:
         is_in_cache = key in lazy_action_cache
     except Exception as e:
-        print(f"{log_prefix} unknown error in check key in cache, reset cache!{e=}")
+        print(f"{log_prefix} unknown error in check key in cache, reset cache! e={e}")
         _reset_cache()
 
     if is_in_cache:
@@ -114,7 +114,7 @@ def _get_or_run_and_set(
             return lazy_action_cache[key]
         except Exception as e:
             print(
-                f"{log_prefix} unknown error in lazy_action fetch result, reset cache! {e=}"
+                f"{log_prefix} unknown error in lazy_action fetch result, reset cache! e={e}"
             )
             result = func(
                 *args,
@@ -134,7 +134,7 @@ def _get_or_run_and_set(
             return result
         except Exception as e:
             print(
-                f"{log_prefix} unknown error in lazy_action set result reset cache! {e=}"
+                f"{log_prefix} unknown error in lazy_action set result reset cache! e={e}"
             )
             _reset_cache()
             lazy_action_cache.set(key, result, expire=expire)
