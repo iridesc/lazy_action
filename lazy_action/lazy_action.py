@@ -46,10 +46,9 @@ def _reset_cache():
 
     if lazy_action_cache is not None:
         try:
-            lazy_action_cache.close() # 尝试关闭底层连接
+            lazy_action_cache.close()  # 尝试关闭底层连接
         except Exception as close_e:
             print(f"{log_prefix} Error closing cache explicitly: {close_e}")
-    
     lazy_action_cache = None
 
     if os.path.exists(lazy_action_folder):
@@ -77,6 +76,8 @@ def _reset_cache():
 
 
 try:
+    if not os.path.exists(lazy_action_folder):
+        os.makedirs(lazy_action_folder)
     names = os.listdir(lazy_action_folder)
     names.sort(reverse=True)
 

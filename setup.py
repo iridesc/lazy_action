@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="lazy_action",
-    version="0.1.3",
+    version="0.1.5",
     author="Irid",
     author_email="irid.zzy@gmail.com",
     description="lazy_action make your func lazy",
