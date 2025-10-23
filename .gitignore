@@ -6,3 +6,4 @@ dist/*
 lazy_action/__pycache__
 lazy_action.egg-info/*
 build/
+.disk_cache_reset.lock
