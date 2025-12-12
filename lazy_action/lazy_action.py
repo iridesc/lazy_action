@@ -20,12 +20,17 @@ logger = logging.getLogger(__name__)
 
 MEMORY_CACHE_THRESHOLD = 10000
 
+LAZY_ACTION_FILE_PATH = os.path.abspath(os.getenv("LAZY_ACTION_FILE_PATH", "./")) 
+if not os.path.exists(LAZY_ACTION_FILE_PATH):
+    raise Exception(f"env LAZY_ACTION_FILE_PATH={LAZY_ACTION_FILE_PATH} does not exist!")
 
 # 缓存目录
-lazy_action_folder = ".lazy_action"
+lazy_action_folder = os.path.join(LAZY_ACTION_FILE_PATH, ".lazy_action") 
 
 # 执行reset 时的锁
-disk_cache_reset_lock_path = ".disk_cache_reset.lock"
+disk_cache_reset_lock_path = os.path.join(
+    LAZY_ACTION_FILE_PATH, ".disk_cache_reset.lock"
+) 
 
 # 当前缓存实例使用的路径
 disk_cache_path = ""
