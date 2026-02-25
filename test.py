@@ -4,6 +4,7 @@ import random
 import time
 import shutil
 from venv import logger
+from importlib.metadata import version as get_version
 
 from lazy_action.lazy_action import (
     lazy_action,
@@ -350,6 +351,7 @@ def test_case_performance():
 # ----------------------------------------------------------------------
 
 if __name__ == "__main__":
+    __version__ = get_version("lazy_action")
     logging.basicConfig(
         # level=logging.DEBUG,
         level=logging.INFO,
@@ -367,5 +369,6 @@ if __name__ == "__main__":
     test_case_performance()
 
     cleanup_cache_dirs()
+    print(f"📦 Version: {__version__}")
 
     # print("\n\n=== 🎉 所有测试用例已成功运行！===")

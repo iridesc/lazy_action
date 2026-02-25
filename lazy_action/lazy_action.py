@@ -1,4 +1,6 @@
+import hashlib
 import inspect
+import pickle
 import threading
 import time
 import traceback
@@ -20,17 +22,19 @@ logger = logging.getLogger(__name__)
 
 MEMORY_CACHE_THRESHOLD = 10000
 
-LAZY_ACTION_FILE_PATH = os.path.abspath(os.getenv("LAZY_ACTION_FILE_PATH", "./")) 
+LAZY_ACTION_FILE_PATH = os.path.abspath(os.getenv("LAZY_ACTION_FILE_PATH", "./"))
 if not os.path.exists(LAZY_ACTION_FILE_PATH):
-    raise Exception(f"env LAZY_ACTION_FILE_PATH={LAZY_ACTION_FILE_PATH} does not exist!")
+    raise Exception(
+        f"env LAZY_ACTION_FILE_PATH={LAZY_ACTION_FILE_PATH} does not exist!"
+    )
 
 # 缓存目录
-lazy_action_folder = os.path.join(LAZY_ACTION_FILE_PATH, ".lazy_action") 
+lazy_action_folder = os.path.join(LAZY_ACTION_FILE_PATH, ".lazy_action")
 
 # 执行reset 时的锁
 disk_cache_reset_lock_path = os.path.join(
     LAZY_ACTION_FILE_PATH, ".disk_cache_reset.lock"
-) 
+)
 
 # 当前缓存实例使用的路径
 disk_cache_path = ""
@@ -39,7 +43,6 @@ disk_cache = None
 
 memory_cache_action_lock = threading.Lock()
 memory_cache = None
-
 
 
 def _del_path(path):
@@ -163,14 +166,13 @@ def _init_memory_cache(reset=False):
     global memory_cache
     if memory_cache is None or reset:
         memory_cache = SimpleCache(threshold=MEMORY_CACHE_THRESHOLD)
-    
 
 
 def _get_from_memory(key):
     global memory_cache
     try:
         with memory_cache_action_lock:
-            return memory_cache.get(key) 
+            return memory_cache.get(key)
     except Exception as e:
         logger.error(f"_get_from_memory: global memory cache get error: {e}")
         _init_memory_cache(
@@ -215,7 +217,7 @@ def _get_or_run_and_set(
             if expire is None:
                 setter(key, t_result, None)
                 continue
-            rest_time = (t_result[1] + expire) - now_time 
+            rest_time = (t_result[1] + expire) - now_time
             if rest_time > 0:
                 setter(key, t_result, rest_time)
 
@@ -225,13 +227,31 @@ def _get_or_run_and_set(
         func(
             *args,
             **kwargs,
-        ), 
-        time.time()
+        ),
+        time.time(),
     )
     for _, setter in getter_and_setters:
         setter(key, t_result, expire)
 
     return t_result
+
+
+def _make_hashable_key(fixed_prefix, args, kwargs):
+    """
+    将复杂的函数参数转换为唯一的 SHA256 哈希值。
+    1. 使用 pickle 处理不可哈希的对象 (list, dict)。
+    2. 使用 hashlib 生成固定长度的哈希串。
+    """
+    try:
+        # 使用 pickle.dumps 将所有参数序列化为字节流
+        # protocol=4 兼顾了性能和兼容性
+        core_data = pickle.dumps((fixed_prefix, args, kwargs), protocol=4)
+        return hashlib.sha256(core_data).hexdigest()
+    except Exception as e:
+        # 万一遇到无法 pickle 的对象（如文件句柄），回退到字符串表示
+        logger.warning(f"Key serialization failed, falling back to str: {e}")
+        fallback_str = f"{fixed_prefix}-{str(args)}-{str(sorted(kwargs.items()))}"
+        return hashlib.sha256(fallback_str.encode()).hexdigest()
 
 
 def lazy_action(expire=60, mode="disk"):
@@ -267,17 +287,21 @@ def lazy_action(expire=60, mode="disk"):
     """
 
     def decorator(func):
+        if inspect.iscoroutinefunction(func):
+            raise TypeError(f"[@lazy_action] 不支持异步函数 '{func.__name__}'。")
         fixed_key_prefix = (
             inspect.getabsfile(func),  # 昂贵操作，只执行一次！
             func.__name__,
         )
+
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             # i_start = time.time()
-            key = (
+
+            key = _make_hashable_key(
                 fixed_key_prefix,
                 args,
-                tuple(kwargs.items()),
+                kwargs,
             )
             # global init_cost
             # init_cost += time.time() - i_start
