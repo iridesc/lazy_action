@@ -12,6 +12,7 @@ import os
 import portalocker
 from cachelib import SimpleCache
 import logging
+from retry import retry
 
 logging.basicConfig(
     level=logging.WARN,
@@ -101,13 +102,28 @@ def _reset_disk_cache():
 
         _rm_disk_caches()
         disk_cache_path = os.path.join(lazy_action_folder, f"disk_cache_{time.time()}")
-        disk_cache = Cache(disk_cache_path)
+        disk_cache = _init_disk_cache_with_options(disk_cache_path)
         logger.error(f"_reset_disk_cache: cache reset to {disk_cache_path}")
+
+
+@retry(tries=5, delay=0.5)
+def _init_disk_cache_with_options(path):
+    cache = Cache(path, timeout=60, settings={"sqlite_journal_mode": "wal"})
+    # 获取底层 sqlite3 连接并设置优化参数
+    # diskcache 的 _con 是一个属性，会触发连接创建
+    with cache:
+        con = cache._con
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA synchronous=NORMAL")
+        con.execute("PRAGMA busy_timeout=60000")
+        con.execute("PRAGMA mmap_size=268435456")
+        con.execute("PRAGMA temp_store=MEMORY")
+    return cache
 
 
 def _init_disk_cache():
     global disk_cache, disk_cache_path
-    if disk_cache and disk_cache_path:
+    if disk_cache is not None and disk_cache_path:
         return
     try:
         _check_and_init_lazy_action_folder()
@@ -117,7 +133,7 @@ def _init_disk_cache():
         for name in names:
             if name.startswith("disk_cache_"):
                 disk_cache_path = os.path.join(lazy_action_folder, name)
-                disk_cache = Cache(disk_cache_path)
+                disk_cache = _init_disk_cache_with_options(disk_cache_path)
                 break
 
         else:
