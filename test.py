@@ -352,6 +352,7 @@ def test_case_performance():
 
 if __name__ == "__main__":
     __version__ = get_version("lazy_action")
+    print(f"📦 Version: {__version__}")
     logging.basicConfig(
         # level=logging.DEBUG,
         level=logging.INFO,
