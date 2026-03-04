@@ -108,7 +108,7 @@ def _reset_disk_cache():
 
 @retry(tries=5, delay=0.5)
 def _init_disk_cache_with_options(path):
-    cache = Cache(path, timeout=60, settings={"sqlite_journal_mode": "wal"})
+    cache = Cache(path, timeout=60)
     # 获取底层 sqlite3 连接并设置优化参数
     # diskcache 的 _con 是一个属性，会触发连接创建
     with cache:
