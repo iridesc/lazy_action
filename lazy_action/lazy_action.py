@@ -23,6 +23,14 @@ logger = logging.getLogger(__name__)
 
 MEMORY_CACHE_THRESHOLD = 10000
 
+LAZY_ACTION_DISK_CACHE_MMAP_SIZE = int(
+    os.getenv("LAZY_ACTION_DISK_CACHE_MMAP_SIZE", "268435456")
+)
+LAZY_ACTION_DISK_CACHE_BUSY_TIMEOUT = int(
+    os.getenv("LAZY_ACTION_DISK_CACHE_BUSY_TIMEOUT", "60000")
+)
+
+
 LAZY_ACTION_FILE_PATH = os.path.abspath(os.getenv("LAZY_ACTION_FILE_PATH", "./"))
 if not os.path.exists(LAZY_ACTION_FILE_PATH):
     raise Exception(
@@ -115,8 +123,8 @@ def _init_disk_cache_with_options(path):
         con = cache._con
         con.execute("PRAGMA journal_mode=WAL")
         con.execute("PRAGMA synchronous=NORMAL")
-        con.execute("PRAGMA busy_timeout=60000")
-        con.execute("PRAGMA mmap_size=268435456")
+        con.execute(f"PRAGMA busy_timeout={LAZY_ACTION_DISK_CACHE_BUSY_TIMEOUT}")
+        con.execute(f"PRAGMA mmap_size={LAZY_ACTION_DISK_CACHE_MMAP_SIZE}")
         con.execute("PRAGMA temp_store=MEMORY")
     return cache
 
