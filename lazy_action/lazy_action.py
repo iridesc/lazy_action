@@ -21,13 +21,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MEMORY_CACHE_THRESHOLD = 10000
+LAZY_ACTION_MEMORY_CACHE_THRESHOLD = int(
+    os.getenv("LAZY_ACTION_MEMORY_CACHE_THRESHOLD", "10000")
+)
 
 LAZY_ACTION_DISK_CACHE_MMAP_SIZE = int(
     os.getenv("LAZY_ACTION_DISK_CACHE_MMAP_SIZE", "268435456")
 )
-LAZY_ACTION_DISK_CACHE_BUSY_TIMEOUT = int(
-    os.getenv("LAZY_ACTION_DISK_CACHE_BUSY_TIMEOUT", "60000")
+LAZY_ACTION_DISK_CACHE_JOURNAL_MODE = os.getenv(
+    "LAZY_ACTION_DISK_CACHE_JOURNAL_MODE", "WAL"
+)
+LAZY_ACTION_DISK_CACHE_BUSY_TIMEOUT = (
+    int(os.getenv("LAZY_ACTION_DISK_CACHE_BUSY_TIMEOUT", "60")) * 1000
+)
+LAZY_ACTION_DISK_CACHE_ERROR_CACHE_RETENTION_PERIOD = int(
+    os.getenv("LAZY_ACTION_DISK_CACHE_ERROR_CACHE_RETENTION_PERIOD", "3600")
 )
 
 
@@ -76,10 +84,30 @@ def _del_path(path):
 
 
 def _rm_disk_caches():
+    now = time.time()
     for name in os.listdir(lazy_action_folder):
-        if name.startswith("disk_cache_"):
-            target_folder = os.path.join(lazy_action_folder, name)
-            _del_path(target_folder)
+        try:
+            if name.startswith("disk_cache_"):
+                target_folder = os.path.join(lazy_action_folder, name)
+
+                # 获取文件夹的最后修改时间
+                mtime = os.path.getmtime(target_folder)
+
+                # 如果当前时间与最后修改时间之差大于阈值，说明是无用的旧缓存
+                if (now - mtime) > LAZY_ACTION_DISK_CACHE_ERROR_CACHE_RETENTION_PERIOD:
+                    logger.debug(
+                        f"_rm_disk_caches: Removing old cache: {target_folder}"
+                    )
+                    _del_path(target_folder)
+                else:
+                    # 距离最后一次活动不足 10 分钟，跳过，确保安全
+                    logger.debug(
+                        f"_rm_disk_caches: Skipping active cache: {target_folder}"
+                    )
+        except Exception as e:
+            logger.error(
+                f"_rm_disk_caches: Error occurred while removing disk caches: {e}"
+            )
 
 
 def _check_and_init_lazy_action_folder():
@@ -121,7 +149,7 @@ def _init_disk_cache_with_options(path):
     # diskcache 的 _con 是一个属性，会触发连接创建
     with cache:
         con = cache._con
-        con.execute("PRAGMA journal_mode=WAL")
+        con.execute(f"PRAGMA journal_mode={LAZY_ACTION_DISK_CACHE_JOURNAL_MODE}")
         con.execute("PRAGMA synchronous=NORMAL")
         con.execute(f"PRAGMA busy_timeout={LAZY_ACTION_DISK_CACHE_BUSY_TIMEOUT}")
         con.execute(f"PRAGMA mmap_size={LAZY_ACTION_DISK_CACHE_MMAP_SIZE}")
@@ -189,7 +217,7 @@ def _set_in_disk(key, t_result, rest_time):
 def _init_memory_cache(reset=False):
     global memory_cache
     if memory_cache is None or reset:
-        memory_cache = SimpleCache(threshold=MEMORY_CACHE_THRESHOLD)
+        memory_cache = SimpleCache(threshold=LAZY_ACTION_MEMORY_CACHE_THRESHOLD)
 
 
 def _get_from_memory(key):
