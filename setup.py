@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="lazy_action",
-    version="1.0.6",
+    version="1.0.7",
     author="Irid",
     author_email="irid.zzy@gmail.com",
     description="lazy_action make your func lazy",
@@ -19,5 +19,5 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=["diskcache", "cachelib", "portalocker", "retry"],
+    install_requires=["diskcache", "cachelib", "portalocker", "retry", "redis"],
 )
