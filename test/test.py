@@ -10,6 +10,7 @@ from lazy_action.lazy_action import (
     lazy_action,
     lazy_action_folder,
     _init_memory_cache,
+    _init_redis_cache,
 )
 
 # ----------------------------------------------------------------------
@@ -278,15 +279,17 @@ class TestI:
 
 
 def test_case_performance():
-    show_test_info("性能测试：比较 Memory, Disk, Mix 模式的缓存命中速度")
+    show_test_info("性能测试：比较 Memory, Disk, Mix, Redis, Memory+Redis 模式的缓存命中速度")
 
     k_amount = 2000
     expire = 3
 
+    redis_url = os.getenv("LAZY_ACTION_REDIS_URL", "")
+    use_redis = bool(redis_url)
+
     keys = generate_production_like_key_sequence_pure_python(k_amount, k_amount*100, )
     base_keys = [TestI(k) for k in set(keys)] 
     keys = [TestI(k) for k in keys]
-    # print(keys)
 
     @lazy_action(expire=expire, mode="disk")
     def t_disk(k):
@@ -300,6 +303,9 @@ def test_case_performance():
     def t_mix(k):
         return TestR(k)
 
+    def t_redis(k):
+        return TestR(k)
+
     def t(k):
         return TestR(k)
 
@@ -309,6 +315,25 @@ def test_case_performance():
         "mix": t_mix,
         "base": t,
     }
+
+    if use_redis:
+        from lazy_action.lazy_action import _init_redis_cache
+        redis_client = _init_redis_cache()
+        if redis_client:
+            redis_client.flushdb()
+            @lazy_action(expire=expire, mode="redis")
+            def t_redis(k):
+                return TestR(k)
+            mode_to_func["redis"] = t_redis
+            
+            @lazy_action(expire=expire, mode="memory_redis")
+            def t_memory_redis(k):
+                return TestR(k)
+            mode_to_func["memory_redis"] = t_memory_redis
+            
+            print(f"✅ Redis 已启用: {redis_url}")
+        else:
+            print("⚠️ Redis 连接失败，跳过 Redis 性能测试")
 
 
     # warm up
@@ -323,7 +348,8 @@ def test_case_performance():
     
     logger.info(f"{log_prefix} 预热完成")
 
-
+    if use_redis:
+        redis_client.flushdb()
 
     mode_to_time = {
         "disk": 0,
@@ -331,6 +357,10 @@ def test_case_performance():
         "mix": 0,
         "base": 0,
     }
+    if use_redis:
+        mode_to_time["redis"] = 0
+        mode_to_time["memory_redis"] = 0
+
     for mode, func in mode_to_func.items():
 
         start = time.time()
@@ -345,13 +375,187 @@ def test_case_performance():
         
     logger.info(f"{log_prefix} {mode_to_time=}")
 
+    print("\n" + "=" * 50)
+    print("性能测试结果汇总")
+    print("=" * 50)
+    for mode, t in sorted(mode_to_time.items(), key=lambda x: x[1]):
+        print(f"  {mode:10s}: {t:.3f}s")
+    print("=" * 50)
+
+
+def test_case_redis_cache():
+    show_test_info("Redis 缓存测试")
+
+    redis_url = os.getenv("LAZY_ACTION_REDIS_URL", "")
+    if not redis_url:
+        print("⚠️  未配置 LAZY_ACTION_REDIS_URL 环境变量，跳过 Redis 测试")
+        print("    请设置环境变量: export LAZY_ACTION_REDIS_URL=redis://localhost:6379/0")
+        return
+
+    print(f"✅ 连接到 Redis: {redis_url}")
+    redis_client = _init_redis_cache()
+    if redis_client is None:
+        print("❌ Redis 连接失败，跳过测试")
+        return
+
+    redis_client.flushdb()
+    print("✅ Redis 已清空")
+
+    @lazy_action(expire=3, mode="redis")
+    def t_redis():
+        time.sleep(0.5)
+        return time.time()
+
+    logger.info(f"{log_prefix} 首次调用 Redis 缓存")
+    r1 = t_redis()
+    logger.info(f"{log_prefix} r1={r1}")
+
+    logger.info(f"{log_prefix} 第二次调用 (应该命中缓存)")
+    r2 = t_redis()
+    logger.info(f"{log_prefix} r2={r2}")
+    assert r1 == r2, "Redis 缓存未命中"
+
+    logger.info(f"{log_prefix} 等待 3 秒后再次调用 (缓存应该过期)")
+    time.sleep(3)
+    r3 = t_redis()
+    logger.info(f"{log_prefix} r3={r3}")
+    assert r2 != r3, "Redis 缓存未过期"
+
+    redis_client.flushdb()
+    print("✅ Redis 缓存测试通过!")
+
+
+def test_case_memory_redis_basic_functionality():
+    show_test_info("Memory + Redis 模式基本功能测试")
+
+    redis_url = os.getenv("LAZY_ACTION_REDIS_URL", "")
+    if not redis_url:
+        print("⚠️  未配置 LAZY_ACTION_REDIS_URL 环境变量，跳过 Memory+Redis 测试")
+        return
+
+    redis_client = _init_redis_cache()
+    if redis_client is None:
+        print("❌ Redis 连接失败，跳过测试")
+        return
+
+    redis_client.flushdb()
+
+    @lazy_action(expire=3, mode="memory_redis")
+    def t():
+        time.sleep(0.5)
+        return time.time()
+
+    logger.info(f"{log_prefix} 首次调用 (应该执行函数并写入 Redis 和 Memory)")
+    r1 = t()
+    logger.info(f"{log_prefix} r1={r1}")
+
+    logger.info(f"{log_prefix} 第二次调用 (应该命中 Memory 缓存)")
+    r2 = t()
+    logger.info(f"{log_prefix} r2={r2}")
+    assert r1 == r2, "Memory 缓存未命中"
+
+    time.sleep(3)
+    logger.info(f"{log_prefix} 等待 3 秒后调用 (Memory 过期，Redis 过期，应该重新执行)")
+    r3 = t()
+    logger.info(f"{log_prefix} r3={r3}")
+    assert r2 != r3, "缓存未过期"
+
+    redis_client.flushdb()
+    print("✅ Memory+Redis 缓存测试通过!")
+
+
+def test_case_redis_env_missing():
+    show_test_info("Redis 环境变量未设置测试")
+
+    import importlib
+    import sys
+    import os
+
+    original_url = os.environ.get("LAZY_ACTION_REDIS_URL")
+    if "LAZY_ACTION_REDIS_URL" in os.environ:
+        del os.environ["LAZY_ACTION_REDIS_URL"]
+
+    try:
+        import lazy_action.lazy_action as la_module
+        importlib.reload(la_module)
+        
+        @la_module.lazy_action(expire=60, mode="redis")
+        def test_func():
+            return "test"
+
+        try:
+            test_func()
+            print("❌ 应该抛出异常但没有")
+            assert False
+        except Exception as e:
+            if "LAZY_ACTION_REDIS_URL" in str(e):
+                print(f"✅ 正确抛出异常: {e}")
+            else:
+                print(f"❌ 异常信息不正确: {e}")
+                assert False
+    finally:
+        if original_url:
+            os.environ["LAZY_ACTION_REDIS_URL"] = original_url
+        importlib.reload(la_module)
+
+
+def test_case_cache_promotion():
+    show_test_info("缓存提升测试 (L2 -> L1)")
+
+    redis_url = os.getenv("LAZY_ACTION_REDIS_URL", "")
+
+    @lazy_action(expire=60, mode="memory_redis")
+    def t_promotion():
+        return time.time()
+
+    if redis_url:
+        redis_client = _init_redis_cache()
+        if redis_client:
+            redis_client.flushdb()
+
+    logger.info(f"{log_prefix} 第一次调用 - 写入 Redis 和 Memory")
+    r1 = t_promotion()
+
+    if redis_url:
+        redis_client = _init_redis_cache()
+        redis_client.flushdb()
+        logger.info(f"{log_prefix} 清空 Redis，模拟 Redis 无数据")
+
+    logger.info(f"{log_prefix} 第二次调用 - 应该从 Memory 提升")
+    r2 = t_promotion()
+    assert r1 == r2, "Memory 提升失败"
+    logger.info(f"{log_prefix} Memory 缓存命中: r1={r1}, r2={r2}")
+
+    _init_memory_cache(reset=True)
+    logger.info(f"{log_prefix} 清空 Memory")
+
+    if redis_url:
+        redis_client = _init_redis_cache()
+        redis_client.flushdb()
+        logger.info(f"{log_prefix} 清空 Redis")
+
+        logger.info(f"{log_prefix} 第三次调用 - Redis 和 Memory 都无数据，重新执行")
+        r3 = t_promotion()
+        assert r3 != r2, "应该重新执行"
+        logger.info(f"{log_prefix} 重新执行: r3={r3}")
+
+        logger.info(f"{log_prefix} 第四次调用 - 应该命中 Memory")
+        r4 = t_promotion()
+        assert r3 == r4, "Memory 提升失败"
+        logger.info(f"{log_prefix} Memory 缓存命中: r4={r4}")
+
+    print("✅ 缓存提升测试通过!")
+
 
 # ----------------------------------------------------------------------
 # 主执行
 # ----------------------------------------------------------------------
 
 if __name__ == "__main__":
-    __version__ = get_version("lazy_action")
+    try:
+        __version__ = get_version("lazy_action")
+    except Exception:
+        __version__ = "0.0.0"
     print(f"📦 Version: {__version__}")
     logging.basicConfig(
         # level=logging.DEBUG,
@@ -363,10 +567,14 @@ if __name__ == "__main__":
 
     cleanup_cache_dirs()
 
-    # test_case_basic_functionality()
-    # test_case_disk_corruption_recovery()
-    # test_case_memory_failure_recovery()
+    test_case_redis_env_missing()
 
+    test_case_basic_functionality()
+    test_case_disk_corruption_recovery()
+    test_case_memory_failure_recovery()
+    test_case_redis_cache()
+    test_case_memory_redis_basic_functionality()
+    test_case_cache_promotion()
     test_case_performance()
 
     cleanup_cache_dirs()

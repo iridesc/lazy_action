@@ -11,6 +11,7 @@ from sqlite3 import DatabaseError
 import os
 import portalocker
 from cachelib import SimpleCache
+from redis import Redis
 import logging
 from retry import retry
 
@@ -38,6 +39,11 @@ LAZY_ACTION_DISK_CACHE_ERROR_CACHE_RETENTION_PERIOD = int(
     os.getenv("LAZY_ACTION_DISK_CACHE_ERROR_CACHE_RETENTION_PERIOD", "3600")
 )
 
+LAZY_ACTION_REDIS_URL = os.getenv("LAZY_ACTION_REDIS_URL", "")
+LAZY_ACTION_REDIS_KEY_PREFIX = os.getenv("LAZY_ACTION_REDIS_KEY_PREFIX", "lazy_action:")
+
+redis_client = None
+redis_cache_lock = threading.Lock()
 
 LAZY_ACTION_FILE_PATH = os.path.abspath(os.getenv("LAZY_ACTION_FILE_PATH", "./"))
 if not os.path.exists(LAZY_ACTION_FILE_PATH):
@@ -245,6 +251,41 @@ def _set_in_memory(key, t_result, rest_time):
         )
 
 
+def _init_redis_cache():
+    global redis_client
+    if redis_client is not None:
+        return redis_client
+    if not LAZY_ACTION_REDIS_URL:
+        raise Exception("LAZY_ACTION_REDIS_URL environment variable is not set. Please set it to use Redis cache (e.g., redis://localhost:6379/0)")
+    try:
+        redis_client = Redis.from_url(LAZY_ACTION_REDIS_URL, decode_responses=False)
+        redis_client.ping()
+        return redis_client
+    except Exception as e:
+        raise Exception(f"Failed to connect to Redis: {e}")
+
+
+def _get_from_redis(key):
+    global redis_client
+    if redis_client is None:
+        redis_client = _init_redis_cache()
+    full_key = f"{LAZY_ACTION_REDIS_KEY_PREFIX}{key}"
+    data = redis_client.get(full_key)
+    if data is None:
+        return None
+    return pickle.loads(data)
+
+
+def _set_in_redis(key, t_result, rest_time):
+    global redis_client
+    if redis_client is None:
+        redis_client = _init_redis_cache()
+    full_key = f"{LAZY_ACTION_REDIS_KEY_PREFIX}{key}"
+    serialized = pickle.dumps(t_result)
+    expire_seconds = int(rest_time) if rest_time else None
+    redis_client.set(full_key, serialized, ex=expire_seconds)
+
+
 def _get_or_run_and_set(
     key,
     func,
@@ -332,9 +373,11 @@ def lazy_action(expire=60, mode="disk"):
                 - "disk"(默认/default): 仅使用 L2 磁盘缓存 (diskcache)，支持多进程访问和持久化。
                   Uses only the L2 disk cache (diskcache), supporting multi-process
                   access and persistence.
+                - "redis": 仅使用 Redis 缓存，通过环境变量 LAZY_ACTION_REDIS_URL 配置。
+                  Uses only Redis cache, configured via LAZY_ACTION_REDIS_URL env var.
     :type mode: str, optional
-    :raises Exception: 如果 mode 参数不是 'mix', 'memory', 或 'disk' 之一。
-                       If the mode parameter is not one of 'mix', 'memory', or 'disk'.
+    :raises Exception: 如果 mode 参数不是 'mix', 'memory', 'disk', 或 'redis' 之一。
+                       If the mode parameter is not one of 'mix', 'memory', 'disk', or 'redis'.
     :return: 缓存装饰器函数。The caching decorator function.
     """
 
@@ -389,6 +432,22 @@ def lazy_action(expire=60, mode="disk"):
                     ],
                 )[0]
 
+            elif mode == "redis":
+                _init_redis_cache()
+                return _get_or_run_and_set(
+                    key,
+                    func,
+                    args,
+                    kwargs,
+                    expire,
+                    getter_and_setters=[
+                        (
+                            _get_from_redis,
+                            _set_in_redis,
+                        ),
+                    ],
+                )[0]
+
             elif mode == "mix":
                 _init_disk_cache()
                 _init_memory_cache()
@@ -411,8 +470,30 @@ def lazy_action(expire=60, mode="disk"):
                     ],
                 )[0]
 
+            elif mode == "memory_redis":
+                _init_redis_cache()
+                _init_memory_cache()
+
+                return _get_or_run_and_set(
+                    key,
+                    func,
+                    args,
+                    kwargs,
+                    expire,
+                    getter_and_setters=[
+                        (
+                            _get_from_memory,
+                            _set_in_memory,
+                        ),
+                        (
+                            _get_from_redis,
+                            _set_in_redis,
+                        ),
+                    ],
+                )[0]
+
             else:
-                raise Exception("mode must be one of [mix, disk, memory]")
+                raise Exception("mode must be one of [mix, disk, memory, redis, memory_redis]")
 
         return wrapper
 
